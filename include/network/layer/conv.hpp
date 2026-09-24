@@ -6,7 +6,7 @@
 #include <random>
 #include <stdexcept>
 
-template <typename F, typename IF, typename B, typename IB, typename A = ReLU, int S = 3>
+template <typename F, typename IF, typename B, typename IB, auto QMF, auto QMB, typename A = ReLU, int S = 3>
 class Conv : public Layer<F, B> {
     static_assert(S % 2 == 1, "S must be odd\n");
     static_assert(S > 1, "S must be > 1\n");
@@ -74,7 +74,7 @@ class Conv : public Layer<F, B> {
                         for (int c = 0; c < inC; c++) {
                             for (int kr = -R; kr <= R; kr++) {
                                 for (int kc = -R; kc <= R; kc++) {
-                                    rSum += input[x + kc, y + kr, c] * weights[ker][kc + R, kr + R, c];
+                                    rSum += QMF( input[x + kc, y + kr, c], weights[ker][kc + R, kr + R, c] );
                                 }
                             }
                         }
@@ -114,9 +114,7 @@ class Conv : public Layer<F, B> {
                 for (int y = R; y < inH - R; y++) {
                     for (int x = R; x < inW - R; x++) {
         
-                        B delta = static_cast<B>(
-                            errIn[x - R, y - R, ker] *
-                            A::template backward<B>(static_cast<B>(cachedPreActivation[x - R, y - R, ker])));
+                        B delta = errIn[x - R, y - R, ker] * A::template backward<B>(static_cast<B>(cachedPreActivation[x - R, y - R, ker]));
         
                         bGrad[ker, 0, 0] += delta;
         
@@ -124,10 +122,10 @@ class Conv : public Layer<F, B> {
                             for (int kr = -R; kr <= R; kr++) {
                                 for (int kc = -R; kc <= R; kc++) {
                                     /* Weight grad */
-                                    kGrad[ker][kc + R, kr + R, c] += static_cast<B>(cachedInputs[x + kc, y + kr, c]) * delta;
+                                    kGrad[ker][kc + R, kr + R, c] += QMB(static_cast<B>(cachedInputs[x + kc, y + kr, c]), delta);
         
                                     /* Err for previous layer */
-                                    errOut[x + kc, y + kr, c] += delta * static_cast<B>(weights[ker][kc + R, kr + R, c]);
+                                    errOut[x + kc, y + kr, c] += QMB(static_cast<B>(weights[ker][kc + R, kr + R, c]), delta);
                                 }
                             }
                         }
@@ -145,7 +143,7 @@ class Conv : public Layer<F, B> {
 
                 Tensor<B> update(weights[ker].layout, static_cast<B>(0.0));
                 for (size_t i = 0; i < update.data.size(); i++) {
-                    update.data[i] = static_cast<B>(static_cast<B>(kGrad[ker].data[i]) * learningRate);
+                    update.data[i] = static_cast<B>(kGrad[ker].data[i]) * learningRate;
                 }
 
                 cachedWeightUpdate.emplace_back(update);
@@ -154,7 +152,7 @@ class Conv : public Layer<F, B> {
             /* Cache Bias Updates */
             Tensor<B> cachedBiasUpdate(biases.layout, static_cast<B>(0.0));
             for (int ker = 0; ker < nKer; ker++)
-                cachedBiasUpdate[ker, 0, 0] = static_cast<B>(static_cast<B>(bGrad[ker, 0, 0]) * learningRate);
+                cachedBiasUpdate[ker, 0, 0] = static_cast<B>(bGrad[ker, 0, 0]) * learningRate;
 
 
             cWeights.emplace_back(std::move(cachedWeightUpdate));

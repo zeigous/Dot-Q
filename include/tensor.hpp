@@ -105,6 +105,12 @@ struct Tensor {
             return oper(other, std::multiplies<>{});
         }
 
+        template <typename U, auto QM>
+        auto unroundedMul(const Tensor<U>& other) const 
+            -> Tensor<decltype(QM(std::declval<T>(), std::declval<U>()))> {
+            return oper(other, QM);
+        }
+
         template <typename U>
         auto operator/(const Tensor<U>& other) const 
             -> Tensor<decltype(std::declval<T>() / std::declval<U>())> {
@@ -116,6 +122,12 @@ struct Tensor {
         auto operator*(const U& other) const 
             -> Tensor<decltype(std::declval<T>() * std::declval<U>())> {
             return oper(other, std::multiplies<>{});
+        }
+
+        template <typename U, auto QM>
+        auto unroundedMul(const U& other) const 
+            -> Tensor<decltype(QM(std::declval<T>(), std::declval<U>()))> {
+            return oper(other, QM);
         }
 
         template <typename U>

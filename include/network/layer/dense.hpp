@@ -6,7 +6,7 @@
 #include <random>
 #include <stdexcept>
 
-template <typename F, typename IF, typename B, typename IB, typename A = ReLU>
+template <typename F, typename IF, typename B, typename IB, auto QMF, auto QMB, typename A = ReLU>
 class Dense : public Layer<F, B> {
     /* Weights */
     Tensor<F>               weights;    /* Weights                  */
@@ -60,7 +60,7 @@ class Dense : public Layer<F, B> {
                 IF sum = static_cast<IF>(0.0);
                 
                 for (size_t in = 0; in < inDim.cols; ++in) {
-                    sum += input[in, 0, 0] * weights[out, in, 0];
+                    sum += QMF(input[in, 0, 0], weights[out, in, 0]);
                 }
 
                 sum += biases[out, 0, 0];
@@ -95,21 +95,18 @@ class Dense : public Layer<F, B> {
             for (size_t out = 0; out < outDim.cols; ++out) {
                 B err = errIn[out, 0, 0];
                 B activDeriv = A::template backward<B>(static_cast<B>(cachedPreActivation[out, 0, 0]));
-                B delta = static_cast<B>(err * activDeriv);
+                B delta = err * activDeriv;
 
                 for (size_t in = 0; in < inDim.cols; in++) {
                     /* Update Weights */
-                    cachedWeightUpdate[out, in, 0] = 
-                        static_cast<B>(learningRate * 
-                            static_cast<B>(
-                                static_cast<B>(cachedInputs[in, 0, 0]) * delta));
+                    cachedWeightUpdate[out, in, 0] = learningRate * static_cast<B>(cachedInputs[in, 0, 0]) * delta;
 
                     /* Calculate Err for Next Layer */
-                    errOut[in, 0, 0] = errOut[in, 0, 0] + delta * static_cast<B>(weights[out, in, 0]);
+                    errOut[in, 0, 0] = errOut[in, 0, 0] + QMB(static_cast<B>(weights[out, in, 0]), delta);
                 }
 
                 /* Update Biases */
-                cachedBiasUpdate[out, 0, 0] = static_cast<B>(learningRate * delta);
+                cachedBiasUpdate[out, 0, 0] = learningRate * delta;
             }
 
             cWeights.emplace_back(cachedWeightUpdate);
