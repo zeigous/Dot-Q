@@ -1,3 +1,6 @@
 build/
 .cache/
 include/3rdParty/
+datasets/
+main
+compile_commands.json
