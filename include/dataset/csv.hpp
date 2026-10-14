@@ -7,43 +7,36 @@
 #include <vector>
 
 template <typename T>
-std::vector<std::pair<Tensor<T>, int>> parseMNIST(const std::string& filepath) {
+std::vector<std::pair<Tensor<T>, int>> parseImageCSV(
+    const std::string& filepath, Layout layout /* Whc */, size_t reserve = 0)
+{
     std::ifstream file(filepath);
-
-    // Check if the file opened successfully
     if (!file.is_open()) {
-        throw std::runtime_error("Err: Could not find database file");
+        throw std::runtime_error("Err: Could not find database file: " + filepath);
     }
 
-    std::string line;
-
     std::vector<std::pair<Tensor<T>, int>> dataset;
-    dataset.reserve(60000);
+    dataset.reserve(reserve);
 
-    // Read the file line-by-line
+    std::string line, cell;
     while (std::getline(file, line)) {
         if (line.empty()) continue;
 
         std::stringstream ss(line);
-        std::string cell;
-        Tensor<double> tmpImage({28, 28, 1});
-        int tmpType = 0;
+        Tensor<T> img(layout);
+        int label = 0;
 
-        if (std::getline(ss, cell, ',')) {
-            tmpType = std::stoi(cell);
-        }
+        if (std::getline(ss, cell, ',')) label = std::stoi(cell);
 
-        for (int y = 0; y < 28; y++) { /* loop over every image pixel */
-        for (int x = 0; x < 28; x++) { /* loop over every image pixel */
-            if (std::getline(ss, cell, ',')) {
-                tmpImage[x, y, 0] = std::stod(cell) / 255.0; /* Normalize between 0 and 1 */
-            }
+        for (unsigned y = 0; y < layout.rows; y++) {
+        for (unsigned x = 0; x < layout.cols; x++) {
+        for (unsigned c = 0; c < layout.chan; c++) {
+            if (std::getline(ss, cell, ','))
+                img[x, y, c] = static_cast<T>(std::stod(cell) / 255.0);
         }
         }
-        
-
-        dataset.emplace_back(std::make_pair(static_cast<Tensor<T>>(tmpImage), tmpType));
+        }
+        dataset.emplace_back(std::move(img), label);
     }
-
     return dataset;
 }

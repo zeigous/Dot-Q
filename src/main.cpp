@@ -11,47 +11,66 @@
 
 #include <universal/number_systems.hpp>
 
+#ifndef REAL_FWD
+#define REAL_FWD float
+#endif
+
+#ifndef REAL_BWD
+#define REAL_BWD double
+#endif
+
+#define NORM_MUL std::multiplies<>{}
 #define QUIRE_MUL [](auto&&... args) { return sw::universal::quire_mul(std::forward<decltype(args)>(args)...); }
 
-using half = _Float16;
+#ifndef MUL
+#define MUL NORM_MUL
+#endif
 
-using RealBack = double;
-using RealForward = sw::universal::posit<32, 2>;
+#ifndef DATASET_TEST
+#define DATASET_TEST "datasets/CIFAR-10/cifar10_test.csv"
+#endif
 
-constexpr RealBack learningRate = static_cast<RealBack>(0.03f);
+#ifndef DATASET_TRAIN
+#define DATASET_TRAIN "datasets/CIFAR-10/cifar10_train.csv"
+#endif
+
+using RealBack = REAL_BWD;
+using RealForward = REAL_FWD;
+
+constexpr RealBack learningRate = static_cast<RealBack>(0.02);
 constexpr int batchSize = 32;
-constexpr int epochs = 5;
+constexpr int epochs = 8;
 
 
 int main() {  
 
     /* Construct the Network */
     std::vector<Layer<RealForward, RealBack>*> network{
-        new Conv<RealForward, RealForward, RealBack, RealBack, std::multiplies<>{}, std::multiplies<>{}, ReLU, 3>({28, 28, 1}, {26, 26, 4}),
-        new Conv<RealForward, RealForward, RealBack, RealBack, std::multiplies<>{}, std::multiplies<>{}, ReLU, 3>({26, 26, 4}, {24, 24, 6}),
-        new MaxPool<RealForward, RealBack>({24, 24, 6}, {12, 12, 6}),
-        new Conv<RealForward, RealForward, RealBack, RealBack, std::multiplies<>{}, std::multiplies<>{}, ReLU, 3>({12, 12, 6}, {10, 10, 8}),
-        new MaxPool<RealForward, RealBack>({10, 10, 8}, {5, 5, 8}),
-        new Flatten<RealForward, RealBack>({5, 5, 8}, {5 * 5 * 8, 1, 1}),
-        new Dense<RealForward, RealForward, RealBack, RealBack, std::multiplies<>{}, std::multiplies<>{}, ReLU>({5 * 5 * 8 , 1, 1}, {100, 1, 1}),
-        new Dense<RealForward, RealForward, RealBack, RealBack, std::multiplies<>{}, std::multiplies<>{}, ReLU>({100, 1, 1}, {50, 1, 1}),
-        new Dense<RealForward, RealForward, RealBack, RealBack, std::multiplies<>{}, std::multiplies<>{}, Linear>({50, 1, 1}, {10, 1, 1}),
+        new Conv<RealForward, RealForward, RealBack, RealBack, MUL, MUL, ReLU, 5>({32, 32, 3}, {28, 28, 6}),
+        new MaxPool<RealForward, RealBack>({28, 28, 6}, {14, 14, 6}),
+        new Conv<RealForward, RealForward, RealBack, RealBack, MUL, MUL, ReLU, 3>({14, 14, 6}, {12, 12, 8}),
+        new MaxPool<RealForward, RealBack>({12, 12, 8}, {6, 6, 8}),
+        new Conv<RealForward, RealForward, RealBack, RealBack, MUL, MUL, ReLU, 3>({6, 6, 8}, {4, 4, 10}),
+        new Flatten<RealForward, RealBack>({4, 4, 10}, {4*4*10, 1, 1}),
+        new Dense<RealForward, RealForward, RealBack, RealBack, MUL, MUL, ReLU>({4*4*10 , 1, 1}, {100, 1, 1}),
+        new Dense<RealForward, RealForward, RealBack, RealBack, MUL, MUL, ReLU>({100, 1, 1}, {50, 1, 1}),
+        new Dense<RealForward, RealForward, RealBack, RealBack, MUL, MUL, Linear>({50, 1, 1}, {10, 1, 1}),
     };
 
     /* Init the neural net */
-    NeuralNetwork<RealForward, RealForward, RealBack, RealBack> net("datasets/MNIST/mnist_train.csv", "datasets/MNIST/mnist_test.csv", parseMNIST<RealForward>, std::move(network));
+    NeuralNetwork<RealForward, RealForward, RealBack, RealBack> net(DATASET_TRAIN, DATASET_TEST, {32, 32, 3}, parseImageCSV<RealForward>, std::move(network));
     
 
     /* Epochs */
     std::cout << "Loss,Accuracy" << "\n";
     for (int epoch = 0; epoch < epochs; epoch++) {
-        std::pair<float, float> preRes = net.testEpoch();
+        std::pair<float, float> preRes = net.testEpoch(2000);
         std::cout << preRes.second << "," << preRes.first << "\n";
 
         net.trainEpoch(batchSize, learningRate);
     }
 
-    std::pair<float, float> res = net.testEpoch();
+    std::pair<float, float> res = net.testEpoch(-1);
     std::cout << res.second << "," << res.first << "\n";
 
 

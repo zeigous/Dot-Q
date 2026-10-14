@@ -2,6 +2,8 @@
 
 #include "tensor.hpp"
 
+inline unsigned nextSeed() { static unsigned n = 0; return RANDOM_SEED + 7919 /* A random bs number */ * n++; }
+
 template <typename F, typename B>
 class Layer {
     public:

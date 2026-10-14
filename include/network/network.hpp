@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef RANDOM_SEED
+#define RANDOM_SEED 0
+#endif
+
 #include "network/layer.hpp"
 #include "network/error/softmax.hpp"
 #include "tensor.hpp"
@@ -20,15 +24,16 @@ class NeuralNetwork {
 
     std::mt19937 gen;
     public:
-        NeuralNetwork(std::string trainPath, std::string testPath, std::function<std::vector<std::pair<Tensor<F>, int>>(std::string path)> loaderFn, std::vector<Layer<F, B>*> net) 
+        NeuralNetwork(std::string trainPath, std::string testPath, Layout layout, std::function<std::vector<std::pair<Tensor<F>, int>>(const std::string& filepath, Layout layout, size_t reserve)> loaderFn, std::vector<Layer<F, B>*> net) 
             : network(std::move(net))
             {
-            train = loaderFn(trainPath);
-            test = loaderFn(testPath);
+            train = loaderFn(trainPath, layout, 0);
+            test = loaderFn(testPath, layout, 0);
 
             /* Random for choosing images */
-            std::random_device rd;
-            gen = std::mt19937(rd());
+            gen = std::mt19937(RANDOM_SEED);
+
+            std::shuffle(test.begin(), test.end(), gen);
         }
 
         ~NeuralNetwork() {
@@ -82,14 +87,14 @@ class NeuralNetwork {
             }
         }
 
-        std::pair<float, float> testEpoch() {
+        std::pair<float, float> testEpoch(int numImages) {
             /* Test images */
-            std::shuffle(test.begin(), test.end(), gen);
-
             float averageLoss = 0.0f;
             float averageAccuracy = 0.0f;
 
-            for (size_t im = 0; im < test.size(); im++) {
+            const size_t n = (numImages < 1) ? test.size() : std::min<size_t>(numImages, test.size());
+
+            for (size_t im = 0; im < n; im++) {
                 /* Forward pass */
                 Tensor<F> layerOut(test[im].first);
 
@@ -116,8 +121,8 @@ class NeuralNetwork {
                 averageLoss += soft.second;
             }
 
-            averageLoss     /= static_cast<float>(test.size());
-            averageAccuracy /= static_cast<float>(test.size());
+            averageLoss     /= static_cast<float>(n);
+            averageAccuracy /= static_cast<float>(n);
             averageAccuracy *= 100;
 
             return std::make_pair(averageAccuracy, averageLoss);

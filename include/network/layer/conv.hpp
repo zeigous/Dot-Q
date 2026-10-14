@@ -202,8 +202,7 @@ class Conv : public Layer<F, B> {
     private:
         void kaimingInit() {
             /* Init weights via Kaiming Init */
-            std::random_device rd;
-            std::mt19937 gen(rd());
+            std::mt19937 gen(nextSeed());
             
             double stddev = std::sqrt(2.0 / (S * S * inDim.chan));
             std::normal_distribution<double> dist(0.0, stddev);

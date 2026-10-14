@@ -1,6 +1,9 @@
 build/
 .cache/
 include/3rdParty/
-datasets/
+datasets/CIFAR-10
+datasets/MNIST
+datasets/SVHN
 main
 compile_commands.json
+data/
