@@ -72,16 +72,16 @@ int main() {
     
 
     /* Epochs */
-    std::cout << "Loss,Accuracy" << "\n";
+    std::cout << "Loss,Accuracy" << std::endl;
     for (int epoch = 0; epoch < epochs; epoch++) {
         std::pair<float, float> preRes = net.testEpoch(2000);
-        std::cout << preRes.second << "," << preRes.first << "\n";
+        std::cout << preRes.second << "," << preRes.first << std::endl;
 
         net.trainEpoch(batchSize, learningRate);
     }
 
     std::pair<float, float> res = net.testEpoch(-1);
-    std::cout << res.second << "," << res.first << "\n";
+    std::cout << res.second << "," << res.first << std::endl;
 
 
     return 0;
