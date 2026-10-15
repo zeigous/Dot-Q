@@ -3,6 +3,7 @@
 #include "tensor.hpp"
 #include "network/layer.hpp"
 #include "network/activation.hpp"
+#include "accum.hpp"
 #include <random>
 #include <stdexcept>
 
@@ -64,25 +65,25 @@ class Conv : public Layer<F, B> {
             const int inW  = static_cast<int>(inDim.cols);
             const int inC  = static_cast<int>(inDim.chan);
 
+            const F oneF = static_cast<F>(1);
+
             /* Kernel loop */
             for (int ker = 0; ker < nKer; ker++) {
                 for (int y = R; y < inH - R; y++) {
                     for (int x = R; x < inW - R; x++) {
 
                         /* Conv Sum */
-                        IF rSum = static_cast<IF>(0.0);
+                        IF rSum{};
                         for (int c = 0; c < inC; c++) {
-                            for (int kr = -R; kr <= R; kr++) {
-                                for (int kc = -R; kc <= R; kc++) {
-                                    rSum += QMF( input[x + kc, y + kr, c], weights[ker][kc + R, kr + R, c] );
-                                }
-                            }
+                        for (int kr = -R; kr <= R; kr++) {
+                        for (int kc = -R; kc <= R; kc++) {
+                            rSum += QMF(input[x + kc, y + kr, c], weights[ker][kc + R, kr + R, c]);
                         }
-
-                        rSum += biases[ker, 0, 0];
-                        F pre = static_cast<F>(rSum);
+                        }
+                        }
+                        rSum += QMF(biases[ker, 0, 0], oneF);
+                        F pre = accTo<F>(rSum);
                         cachedPreActivation[x - R, y - R, ker] = pre;
-
                         output[x - R, y - R, ker] = A::template forward<F>(pre);
                     }
                 }
@@ -106,9 +107,10 @@ class Conv : public Layer<F, B> {
             const int inC  = static_cast<int>(inDim.chan);
         
             /* Accumulators */
-            std::vector<Tensor<IB>> kGrad(nKer, Tensor<IB>(weights[0].layout, static_cast<IB>(0.0)));
-            Tensor<IB> bGrad({outDim.chan, 1, 1}, static_cast<IB>(0.0));
-            Tensor<IB> errOut(inDim, static_cast<IB>(0.0));
+            const B oneB = static_cast<B>(1);
+            std::vector<Tensor<IB>> kGrad(nKer, Tensor<IB>(weights[0].layout, IB{}));
+            Tensor<IB> bGrad({outDim.chan, 1, 1}, IB{});
+            Tensor<IB> errOut(inDim, IB{});
         
             for (int ker = 0; ker < nKer; ker++) {
                 for (int y = R; y < inH - R; y++) {
@@ -116,7 +118,7 @@ class Conv : public Layer<F, B> {
         
                         B delta = errIn[x - R, y - R, ker] * A::template backward<B>(static_cast<B>(cachedPreActivation[x - R, y - R, ker]));
         
-                        bGrad[ker, 0, 0] += delta;
+                        bGrad[ker, 0, 0] += QMB(delta, oneB);
         
                         for (int c = 0; c < inC; c++) {
                             for (int kr = -R; kr <= R; kr++) {
@@ -143,7 +145,7 @@ class Conv : public Layer<F, B> {
 
                 Tensor<B> update(weights[ker].layout, static_cast<B>(0.0));
                 for (size_t i = 0; i < update.data.size(); i++) {
-                    update.data[i] = static_cast<B>(kGrad[ker].data[i]) * learningRate;
+                    update.data[i] = accTo<B>(kGrad[ker].data[i]) * learningRate;
                 }
 
                 cachedWeightUpdate.emplace_back(update);
@@ -152,13 +154,12 @@ class Conv : public Layer<F, B> {
             /* Cache Bias Updates */
             Tensor<B> cachedBiasUpdate(biases.layout, static_cast<B>(0.0));
             for (int ker = 0; ker < nKer; ker++)
-                cachedBiasUpdate[ker, 0, 0] = static_cast<B>(bGrad[ker, 0, 0]) * learningRate;
-
+                cachedBiasUpdate[ker, 0, 0] = accTo<B>(bGrad[ker, 0, 0]) * learningRate;
 
             cWeights.emplace_back(std::move(cachedWeightUpdate));
             cBiases.emplace_back(std::move(cachedBiasUpdate));
 
-            return static_cast<Tensor<B>>(errOut);
+            return accTensorTo<B>(errOut);
         }
 
 
@@ -171,30 +172,18 @@ class Conv : public Layer<F, B> {
         void updateValues() override {
             if (cWeights.empty()) return;
             const int nKer = static_cast<int>(outDim.chan);
-                
+            const B n = static_cast<B>(cWeights.size());
+
             for (int ker = 0; ker < nKer; ker++) {
-                /* Weights (Kernels) */
-                Tensor<IB> wAverage({S, S, inDim.chan} , static_cast<IB>(0.0));
-
-                for (const auto& cWeight : cWeights) {
-                    wAverage = wAverage + cWeight[ker];
-                }
-
-                sWeights[ker]   = sWeights[ker] - (static_cast<Tensor<B>>(wAverage) / cWeights.size());
-                weights[ker]    = static_cast<Tensor<F>>(sWeights[ker]);
-
-                
+                Tensor<B> wAvg({S, S, inDim.chan}, static_cast<B>(0));
+                for (const auto& cw : cWeights) wAvg = wAvg + cw[ker];
+                sWeights[ker] = sWeights[ker] - (wAvg / n);
+                weights[ker]  = static_cast<Tensor<F>>(sWeights[ker]);
             }
-
-            /* Bias */
-            Tensor<IB> bAverage({outDim.chan, 1, 1}, static_cast<IB>(0.0));
-
-            for (const auto& cBias : cBiases) {
-                bAverage = bAverage + cBias;
-            }
-            sBiases = sBiases - (static_cast<Tensor<B>>(bAverage) / static_cast<B>(cBiases.size()));
-            biases = static_cast<Tensor<F>>(sBiases);
-            
+            Tensor<B> bAvg({outDim.chan, 1, 1}, static_cast<B>(0));
+            for (const auto& cb : cBiases) bAvg = bAvg + cb;
+            sBiases = sBiases - (bAvg / n);
+            biases  = static_cast<Tensor<F>>(sBiases);
         }
             
         

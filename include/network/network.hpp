@@ -62,9 +62,8 @@ class NeuralNetwork {
                     Tensor<B> expected({10, 1, 1}, static_cast<B>(0.0f));
                     expected[train[batch * batchSize + im].second, 0, 0] = 1;
 
-                    std::pair<Tensor<B>, B> soft = softmaxCrossEntropyOH<B, IB>(static_cast<Tensor<B>>(layerOut), expected);
-
-                    averageLoss += soft.second;
+                    auto soft = softmaxCrossEntropyOH<B, B>(static_cast<Tensor<B>>(layerOut), expected);
+                    averageLoss += static_cast<float>(soft.second);
 
                     /* Backprop */
                     Tensor<B> gradient = soft.first;
@@ -106,7 +105,7 @@ class NeuralNetwork {
                 Tensor<B> expected({10, 1, 1}, static_cast<B>(0.0f));
                 expected[test[im].second, 0, 0] = 1;
 
-                std::pair<Tensor<B>, float> soft = softmaxCrossEntropyOH<B, IB>(static_cast<Tensor<B>>(layerOut), expected);
+                auto soft = softmaxCrossEntropyOH<B, B>(static_cast<Tensor<B>>(layerOut), expected);
 
                 /* See if its correct */
                 size_t maxIdx = 0;
@@ -118,7 +117,7 @@ class NeuralNetwork {
                 if (maxIdx == static_cast<size_t>(test[im].second))
                     averageAccuracy += 1.0f;
                 
-                averageLoss += soft.second;
+                averageLoss += static_cast<float>(soft.second);
             }
 
             averageLoss     /= static_cast<float>(n);

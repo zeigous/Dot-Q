@@ -7,3 +7,7 @@ datasets/SVHN
 main
 compile_commands.json
 data/
+
+logs/
+out/
+sweep.sh

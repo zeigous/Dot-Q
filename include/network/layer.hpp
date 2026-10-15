@@ -1,6 +1,9 @@
 #pragma once
 
 #include "tensor.hpp"
+#ifndef RANDOM_SEED 
+#define RANDOM_SEED 0 
+#endif
 
 inline unsigned nextSeed() { static unsigned n = 0; return RANDOM_SEED + 7919 /* A random bs number */ * n++; }
 

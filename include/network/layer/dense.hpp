@@ -3,6 +3,7 @@
 #include "tensor.hpp"
 #include "network/layer.hpp"
 #include "network/activation.hpp"
+#include "accum.hpp"
 #include <random>
 #include <stdexcept>
 
@@ -52,25 +53,21 @@ class Dense : public Layer<F, B> {
         /* Forward Pass */
         Tensor<F> forward(const Tensor<F>& input) noexcept override {
             cachedInputs = input;
-
+            const F oneF = static_cast<F>(1);
             Tensor<F> outputs(outDim, static_cast<F>(0));
-            Tensor<F> preActivation(outDim, static_cast<IF>(0));
+            Tensor<F> preActivation(outDim, static_cast<F>(0));
 
             for (size_t out = 0; out < outDim.cols; ++out) {
-                IF sum = static_cast<IF>(0.0);
-                
-                for (size_t in = 0; in < inDim.cols; ++in) {
+                IF sum{};
+                for (size_t in = 0; in < inDim.cols; ++in)
                     sum += QMF(input[in, 0, 0], weights[out, in, 0]);
-                }
+                sum += QMF(biases[out, 0, 0], oneF);
 
-                sum += biases[out, 0, 0];
-
-                preActivation[out, 0, 0] = static_cast<F>(sum);
-                outputs[out, 0, 0] = A::template forward<F>(sum);
+                F pre = accTo<F>(sum);
+                preActivation[out, 0, 0] = pre;
+                outputs[out, 0, 0] = A::template forward<F>(pre);   // was passing `sum`
             }
-
             cachedPreActivation = preActivation;
-
             return outputs;
         }
 
@@ -90,7 +87,7 @@ class Dense : public Layer<F, B> {
             Tensor<B> cachedWeightUpdate({outDim.cols, inDim.cols, 1});
             Tensor<B> cachedBiasUpdate({outDim.cols, 1, 1});
 
-            Tensor<IB> errOut({inDim.cols, 1, 1});
+            std::vector<IB> errAcc(inDim.cols);
 
             for (size_t out = 0; out < outDim.cols; ++out) {
                 B err = errIn[out, 0, 0];
@@ -102,15 +99,18 @@ class Dense : public Layer<F, B> {
                     cachedWeightUpdate[out, in, 0] = learningRate * static_cast<B>(cachedInputs[in, 0, 0]) * delta;
 
                     /* Calculate Err for Next Layer */
-                    errOut[in, 0, 0] = errOut[in, 0, 0] + QMB(static_cast<B>(weights[out, in, 0]), delta);
+                    errAcc[in] += QMB(static_cast<B>(weights[out, in, 0]), delta);
                 }
 
                 /* Update Biases */
                 cachedBiasUpdate[out, 0, 0] = learningRate * delta;
             }
 
+            Tensor<B> errOut({inDim.cols, 1, 1});
+            for (size_t i = 0; i < inDim.cols; i++) errOut[i, 0, 0] = accTo<B>(errAcc[i]);
             cWeights.emplace_back(cachedWeightUpdate);
             cBiases.emplace_back(cachedBiasUpdate);
+            return errOut;
 
             return static_cast<Tensor<B>>(errOut);
         }
@@ -122,21 +122,17 @@ class Dense : public Layer<F, B> {
         }
 
         void updateValues() override {
-            Tensor<IB> wAverage({outDim.cols, inDim.cols, 1}, 0.0);
+            if (cWeights.empty()) return;
+            const B n = static_cast<B>(cWeights.size());
+            Tensor<B> wAvg({outDim.cols, inDim.cols, 1}, static_cast<B>(0));
+            for (const auto& cw : cWeights) wAvg = wAvg + cw;
+            sWeights = sWeights - (wAvg / n);
+            weights  = static_cast<Tensor<F>>(sWeights);
 
-            for (const auto& cWeight : cWeights) {
-                wAverage = wAverage + cWeight;
-            }
-            sWeights    = sWeights - (static_cast<Tensor<B>>(wAverage) / cWeights.size());
-            weights     = static_cast<Tensor<F>>(sWeights);
-
-            Tensor<IB> bAverage({outDim.cols, 1, 1}, 0.0);
-
-            for (const auto& cBias : cBiases) {
-                bAverage = bAverage + cBias;
-            }
-            sBiases = sBiases - (static_cast<Tensor<B>>(bAverage) / static_cast<B>(cBiases.size()));
-            biases = static_cast<Tensor<F>>(sBiases);
+            Tensor<B> bAvg({outDim.cols, 1, 1}, static_cast<B>(0));
+            for (const auto& cb : cBiases) bAvg = bAvg + cb;
+            sBiases = sBiases - (bAvg / n);
+            biases  = static_cast<Tensor<F>>(sBiases);
         }
 
     private:
