@@ -11,3 +11,4 @@ data/
 logs/
 out/
 sweep.sh
+smoke.log

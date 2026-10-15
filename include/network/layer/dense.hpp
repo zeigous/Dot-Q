@@ -4,40 +4,56 @@
 #include "network/layer.hpp"
 #include "network/activation.hpp"
 #include "accum.hpp"
+#include <algorithm>
+#include <cmath>
 #include <random>
 #include <stdexcept>
+#include <vector>
 
 template <typename F, typename IF, typename B, typename IB, auto QMF, auto QMB, typename A = ReLU>
 class Dense : public Layer<F, B> {
     /* Weights */
-    Tensor<F>               weights;    /* Weights                  */
-    Tensor<B>               sWeights;   /* Shadow Weights           */
-    std::vector<Tensor<B>>  cWeights;   /* Cached Weight Updates    */
+    Tensor<F>   weights;    /* Weights                              */
+    Tensor<B>   sWeights;   /* Shadow Weights                       */
+    Tensor<B>   wSum;       /* Running sum of weight updates        */
 
     /* Biases */
-    Tensor<F>               biases;     /* Biases                   */
-    Tensor<B>               sBiases;    /* Shadow Biases            */
-    std::vector<Tensor<B>>  cBiases;    /* Cached Bias Updates      */
+    Tensor<F>   biases;     /* Biases                               */
+    Tensor<B>   sBiases;    /* Shadow Biases                        */
+    Tensor<B>   bSum;       /* Running sum of bias updates          */
+
+    size_t nCached = 0;     /* Images accumulated since last update */
 
     /* Cached input/outputs */
     Tensor<F> cachedInputs;
     Tensor<F> cachedPreActivation;
 
+    /* Preallocated backward accumulator (reset per image) */
+    std::vector<IB> errAcc;
+
     /* Dimenstions, rows/chan = 1 */
     Layout inDim;
     Layout outDim;
+
+    static void zeroB(Tensor<B>& t) {
+        std::fill(t.data.begin(), t.data.end(), static_cast<B>(0));
+    }
 
     public:
         /* Constructor */
         Dense(Layout in, Layout out) :
             weights({out.cols, in.cols, 1}),
             sWeights({out.cols, in.cols, 1}),
+            wSum({out.cols, in.cols, 1}, static_cast<B>(0.0f)),
 
             biases({out.cols, 1, 1},    static_cast<F>(0.0f)),
             sBiases({out.cols, 1, 1},   static_cast<B>(0.0f)),
+            bSum({out.cols, 1, 1},      static_cast<B>(0.0f)),
 
             cachedInputs({in.cols, 1, 1}),
             cachedPreActivation({out.cols, 1, 1}),
+
+            errAcc(in.cols),
 
             inDim(in),
             outDim(out)
@@ -55,7 +71,6 @@ class Dense : public Layer<F, B> {
             cachedInputs = input;
             const F oneF = static_cast<F>(1);
             Tensor<F> outputs(outDim, static_cast<F>(0));
-            Tensor<F> preActivation(outDim, static_cast<F>(0));
 
             for (size_t out = 0; out < outDim.cols; ++out) {
                 IF sum{};
@@ -64,10 +79,9 @@ class Dense : public Layer<F, B> {
                 sum += QMF(biases[out, 0, 0], oneF);
 
                 F pre = accTo<F>(sum);
-                preActivation[out, 0, 0] = pre;
-                outputs[out, 0, 0] = A::template forward<F>(pre);   // was passing `sum`
+                cachedPreActivation[out, 0, 0] = pre;
+                outputs[out, 0, 0] = A::template forward<F>(pre);
             }
-            cachedPreActivation = preActivation;
             return outputs;
         }
 
@@ -84,10 +98,7 @@ class Dense : public Layer<F, B> {
                 b = b − η(σ'(z) · δ)
             */
 
-            Tensor<B> cachedWeightUpdate({outDim.cols, inDim.cols, 1});
-            Tensor<B> cachedBiasUpdate({outDim.cols, 1, 1});
-
-            std::vector<IB> errAcc(inDim.cols);
+            std::fill(errAcc.begin(), errAcc.end(), IB{});
 
             for (size_t out = 0; out < outDim.cols; ++out) {
                 B err = errIn[out, 0, 0];
@@ -95,43 +106,40 @@ class Dense : public Layer<F, B> {
                 B delta = err * activDeriv;
 
                 for (size_t in = 0; in < inDim.cols; in++) {
-                    /* Update Weights */
-                    cachedWeightUpdate[out, in, 0] = learningRate * static_cast<B>(cachedInputs[in, 0, 0]) * delta;
+                    /* Update Weights (straight into the running sum) */
+                    B upd = learningRate * static_cast<B>(cachedInputs[in, 0, 0]) * delta;
+                    wSum[out, in, 0] = static_cast<B>(wSum[out, in, 0] + upd);
 
                     /* Calculate Err for Next Layer */
                     errAcc[in] += QMB(static_cast<B>(weights[out, in, 0]), delta);
                 }
 
                 /* Update Biases */
-                cachedBiasUpdate[out, 0, 0] = learningRate * delta;
+                B bUpd = learningRate * delta;
+                bSum[out, 0, 0] = static_cast<B>(bSum[out, 0, 0] + bUpd);
             }
+            nCached++;
 
             Tensor<B> errOut({inDim.cols, 1, 1});
             for (size_t i = 0; i < inDim.cols; i++) errOut[i, 0, 0] = accTo<B>(errAcc[i]);
-            cWeights.emplace_back(cachedWeightUpdate);
-            cBiases.emplace_back(cachedBiasUpdate);
             return errOut;
-
-            return static_cast<Tensor<B>>(errOut);
         }
 
         /* For caching and updating weights / biases */
         void clearCache() override {
-            cWeights.clear();
-            cBiases.clear();
+            zeroB(wSum);
+            zeroB(bSum);
+            nCached = 0;
         }
 
         void updateValues() override {
-            if (cWeights.empty()) return;
-            const B n = static_cast<B>(cWeights.size());
-            Tensor<B> wAvg({outDim.cols, inDim.cols, 1}, static_cast<B>(0));
-            for (const auto& cw : cWeights) wAvg = wAvg + cw;
-            sWeights = sWeights - (wAvg / n);
+            if (nCached == 0) return;
+            const B n = static_cast<B>(nCached);
+
+            sWeights = sWeights - (wSum / n);
             weights  = static_cast<Tensor<F>>(sWeights);
 
-            Tensor<B> bAvg({outDim.cols, 1, 1}, static_cast<B>(0));
-            for (const auto& cb : cBiases) bAvg = bAvg + cb;
-            sBiases = sBiases - (bAvg / n);
+            sBiases = sBiases - (bSum / n);
             biases  = static_cast<Tensor<F>>(sBiases);
         }
 
@@ -139,7 +147,7 @@ class Dense : public Layer<F, B> {
         void kaimingInit() {
             /* Init weights via Kaiming Init */
             std::mt19937 gen(nextSeed());
-            
+
             double stddev = std::sqrt(2.0 / inDim.cols);
             std::normal_distribution<double> dist(0.0, stddev);
 
@@ -148,7 +156,7 @@ class Dense : public Layer<F, B> {
                     sWeights[oc, ic, 0] = static_cast<B>(dist(gen));
                 }
             }
-            
+
             weights = static_cast<Tensor<F>>(sWeights);
         }
 };

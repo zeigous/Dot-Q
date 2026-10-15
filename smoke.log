@@ -1,8 +1,0 @@
-building svhn_fp32_ftz_quire_bsame_s1
-building svhn_fp32_ftz_quire_bsame_s2
-building svhn_fp32_ftz_quire_bsame_s4
-building svhn_fp32_ftz_quire_bsame_s5
-building svhn_fp32_ftz_quire_bsame_s3
-building cifar10_fp32_ftz_quire_bsame_s1
-building cifar10_fp32_ftz_quire_bsame_s2
-building cifar10_fp32_ftz_quire_bsame_s3
